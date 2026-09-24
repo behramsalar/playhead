@@ -1,0 +1,38 @@
+# Go
+/playhead
+*.test
+*.out
+
+# Frontend
+node_modules/
+web/dist/*
+!web/dist/.gitkeep
+*.local
+
+# Runtime state (DATA_DIR default when run locally)
+/data/
+
+# Machine-specific deploy.sh config (host media paths, port) — copy
+# .env.example to .env instead of committing one.
+/.env
+
+# Real media placed in the project root for manual testing — never
+# commit media; test code uses tiny synthetic fixtures instead, never
+# real checked-in video files.
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.m4v
+*.webm
+*.ogv
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.log
+
+# Local Claude Code tooling config (session-specific, not app source)
+.claude/

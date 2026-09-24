@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark light;
+
+  --bg: #ffffff;
+  --bg-elevated: #f5f4f2;
+  --bg-hover: #e9e6e1;
+  --border: #ddd8d1;
+  --text: #1c1917;
+  --text-secondary: #57534e;
+  --text-tertiary: #78716c;
+  --accent: #d97706;
+  --danger: #dc2626;
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+
+  --radius: 10px;
+  --header-height: 56px;
+  --breadcrumb-height: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* A slightly warm near-black rather than a neutral gray — pairs with
+       the amber accent below instead of clashing with it. */
+    --bg: #0c0b0a;
+    --bg-elevated: #181614;
+    --bg-hover: #262320;
+    --border: #322e29;
+    --text: #f5f3f0;
+    --text-secondary: #a8a29e;
+    --text-tertiary: #78716c;
+    --accent: #f59e0b;
+    --danger: #f87171;
+    --warning: #fbbf24;
+    --warning-bg: #3f2d05;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A fixed (not min-) height bounds the app to the viewport, so a route
+   that must always keep its controls visible (the player) can rely on
+   flexbox to shrink its content to fit rather than pushing them below
+   the fold — see main's overflow-y in App.svelte for how a route that
+   *does* want to scroll (Browse, with a potentially long folder listing)
+   still can. */
+#app {
+  height: 100vh;
+  /* dvh accounts for a mobile browser's address bar showing/hiding,
+     where a plain 100vh is taller than the actually-visible area;
+     browsers that don't support dvh simply ignore this line and keep
+     the 100vh above. */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}

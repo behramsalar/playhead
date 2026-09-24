@@ -1,0 +1,22 @@
+services:
+  playhead:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # MEDIA_ROOT is where your media lives (Phase 7). Mount one volume
+      # here (below) and everything under it, however you've organized
+      # it into subfolders, is browsed as one library. If you mount
+      # multiple genuinely separate volumes under MEDIA_ROOT instead
+      # (e.g. -v /mnt/movies:/media/Movies -v /mnt/tv:/media/TV in a
+      # `docker run`, or the equivalent as multiple `volumes:` entries
+      # here), each is auto-discovered as its own separate library — the
+      # app tells the two cases apart by filesystem mount boundary, no
+      # configuration needed either way. Rename libraries later from
+      # Settings.
+      MEDIA_ROOT: /media
+      DATA_DIR: /data
+    volumes:
+      - /path/to/your/videos:/media:ro
+      - ./data:/data
+    restart: unless-stopped

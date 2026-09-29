@@ -53,7 +53,7 @@ func TestFirstIndexedAtSurvivesLaterProbe(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, 1_700_000_000); err != nil {
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, 1_700_000_000, nil); err != nil {
 		t.Fatalf("SetThumbOK error: %v", err)
 	}
 	meta, ok, err := store.GetMetadata(ctx, "id-1")

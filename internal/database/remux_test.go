@@ -184,7 +184,7 @@ func TestResetRemuxStatus(t *testing.T) {
 	if err := store.SetRemuxError(ctx, "id-1", "main", "a.mkv", 1, modTime.Unix(), "boom"); err != nil {
 		t.Fatalf("SetRemuxError: %v", err)
 	}
-	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mkv", 1, modTime.Unix()); err != nil {
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mkv", 1, modTime.Unix(), nil); err != nil {
 		t.Fatalf("SetThumbOK: %v", err)
 	}
 

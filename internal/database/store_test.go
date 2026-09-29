@@ -57,6 +57,61 @@ func TestNeedsProbe(t *testing.T) {
 	}
 }
 
+// TestNeedsProbeTrueForPendingRowEvenWithMatchingSizeMtime guards the fix
+// for "new videos never get a duration": a video's first row can be
+// created by SetThumbOK/SetSpriteOK racing ahead of the indexer, with
+// size/mtime already matching the real file but status left at its
+// default "pending" (no duration/codec data). NeedsProbe must still say
+// true for that row — otherwise the indexer would treat matching
+// size/mtime alone as "already indexed" and skip it on every future scan.
+func TestNeedsProbeTrueForPendingRowEvenWithMatchingSizeMtime(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	modTime := time.Unix(1_700_000_000, 0)
+
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, modTime.Unix(), nil); err != nil {
+		t.Fatalf("SetThumbOK: %v", err)
+	}
+
+	needs, err := store.NeedsProbe(ctx, "id-1", 100, modTime)
+	if err != nil {
+		t.Fatalf("NeedsProbe error: %v", err)
+	}
+	if !needs {
+		t.Fatal("expected NeedsProbe true for a pending row even though size/mtime already match")
+	}
+}
+
+// TestSetThumbOKRecordsAndPreservesDuration checks the other half of the
+// same fix: SetThumbOK/SetSpriteOK can now persist a probed duration
+// directly (closing the gap before the indexer would otherwise reach the
+// file), and a later call with an unknown duration (nil, e.g. probing
+// failed) must not clobber an already-recorded value.
+func TestSetThumbOKRecordsAndPreservesDuration(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	modTime := time.Unix(1_700_000_000, 0)
+
+	duration := 42.5
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, modTime.Unix(), &duration); err != nil {
+		t.Fatalf("SetThumbOK: %v", err)
+	}
+	meta, ok, err := store.GetMetadata(ctx, "id-1")
+	if err != nil || !ok || meta.DurationSeconds == nil || *meta.DurationSeconds != duration {
+		t.Fatalf("expected duration %v recorded, got meta=%+v ok=%v err=%v", duration, meta, ok, err)
+	}
+
+	// A later call (e.g. a retry after a thumbnail cache eviction) with no
+	// duration available must not erase the one already on record.
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, modTime.Unix(), nil); err != nil {
+		t.Fatalf("SetThumbOK (nil duration): %v", err)
+	}
+	meta, ok, err = store.GetMetadata(ctx, "id-1")
+	if err != nil || !ok || meta.DurationSeconds == nil || *meta.DurationSeconds != duration {
+		t.Fatalf("expected duration %v preserved after a nil-duration update, got meta=%+v ok=%v err=%v", duration, meta, ok, err)
+	}
+}
+
 func TestGetMetadataAbsentUntilIndexed(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -173,7 +228,7 @@ func TestThumbStatusLifecycle(t *testing.T) {
 		t.Fatalf("expected fresh row to be thumb-pending, got status=%q ok=%v err=%v", status, ok, err)
 	}
 
-	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, modTime.Unix()); err != nil {
+	if err := store.SetThumbOK(ctx, "id-1", "main", "a.mp4", 100, modTime.Unix(), nil); err != nil {
 		t.Fatalf("SetThumbOK error: %v", err)
 	}
 	status, _, _, _ = store.GetThumbStatus(ctx, "id-1")
@@ -233,7 +288,7 @@ func TestFilterNeedingThumbnail(t *testing.T) {
 			t.Fatalf("UpsertOK(%s): %v", id, err)
 		}
 	}
-	if err := store.SetThumbOK(ctx, "ok-1", "main", "ok-1.mp4", 1, modTime.Unix()); err != nil {
+	if err := store.SetThumbOK(ctx, "ok-1", "main", "ok-1.mp4", 1, modTime.Unix(), nil); err != nil {
 		t.Fatalf("SetThumbOK: %v", err)
 	}
 	if err := store.SetThumbError(ctx, "error-1", "main", "error-1.mp4", 1, modTime.Unix(), "boom"); err != nil {
@@ -269,7 +324,7 @@ func TestListPendingThumbnails(t *testing.T) {
 	if err := store.UpsertOK(ctx, "done-1", "main", "b.mp4", 1, modTime, probe); err != nil {
 		t.Fatalf("UpsertOK: %v", err)
 	}
-	if err := store.SetThumbOK(ctx, "done-1", "main", "b.mp4", 1, modTime.Unix()); err != nil {
+	if err := store.SetThumbOK(ctx, "done-1", "main", "b.mp4", 1, modTime.Unix(), nil); err != nil {
 		t.Fatalf("SetThumbOK: %v", err)
 	}
 

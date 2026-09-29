@@ -56,7 +56,7 @@ func TestRequeueRetryableThumbnailsIgnoresNonErrorRows(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	if err := store.SetThumbOK(ctx, "ok-video", "main", "a.mp4", 100, 1_700_000_000); err != nil {
+	if err := store.SetThumbOK(ctx, "ok-video", "main", "a.mp4", 100, 1_700_000_000, nil); err != nil {
 		t.Fatalf("SetThumbOK: %v", err)
 	}
 	n, err := store.RequeueRetryableThumbnails(ctx, 3)

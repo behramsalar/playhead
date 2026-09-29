@@ -87,6 +87,56 @@ func TestScanIndexesAndSkipsUnchanged(t *testing.T) {
 	}
 }
 
+// TestScanProbesRowCreatedByThumbnailFirst reproduces the "new videos
+// never get a duration" bug: preview generation can create a video's
+// first database row (via Store.SetThumbOK/SetSpriteOK) before the
+// indexer ever reaches that file, with the row's size/mtime already
+// matching the real file but no duration/codec metadata. Without
+// NeedsProbe also checking status == "pending", the indexer would treat
+// that row as already-indexed (size/mtime match) and skip it forever,
+// leaving the duration badge permanently missing for that file.
+func TestScanProbesRowCreatedByThumbnailFirst(t *testing.T) {
+	requireFFmpeg(t)
+
+	root := t.TempDir()
+	path := filepath.Join(root, "a.mp4")
+	generateClip(t, path, 1)
+
+	store := newTestStore(t)
+	roots := []config.Root{{ID: "main", Name: "Videos", Path: root}}
+	idx := indexer.New(store, roots)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	id := idFor(t, "main", "a.mp4")
+	// Simulate a thumbnail job winning the race against the indexer: it
+	// creates the row first, with the file's real size/mtime but no probe
+	// result yet.
+	if err := store.SetThumbOK(context.Background(), id, "main", "a.mp4", info.Size(), info.ModTime().Unix(), nil); err != nil {
+		t.Fatalf("SetThumbOK: %v", err)
+	}
+	meta, ok, err := store.GetMetadata(context.Background(), id)
+	if err != nil || !ok || meta.DurationSeconds != nil {
+		t.Fatalf("expected a duration-less row to exist before scanning, got meta=%+v ok=%v err=%v", meta, ok, err)
+	}
+
+	idx.Scan(context.Background())
+	status := idx.Status()
+	if status.FilesProbed != 1 || status.FilesSkipped != 0 {
+		t.Fatalf("scan status = %+v, want the pre-existing row still probed, not skipped", status)
+	}
+
+	meta, ok, err = store.GetMetadata(context.Background(), id)
+	if err != nil || !ok {
+		t.Fatalf("GetMetadata after scan: error=%v ok=%v", err, ok)
+	}
+	if meta.Status != "ok" || meta.DurationSeconds == nil {
+		t.Fatalf("expected duration to be backfilled after scan, got meta=%+v", meta)
+	}
+}
+
 func TestScanReprobesChangedFile(t *testing.T) {
 	requireFFmpeg(t)
 

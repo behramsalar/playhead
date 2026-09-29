@@ -504,15 +504,26 @@ func (m *Manager) runThumbJob(j thumbJob, done chan struct{}) {
 
 	meta, _, _ := m.store.GetMetadata(m.baseCtx, j.videoID) // best-effort seek-time hint
 
+	// A thumbnail can be the very first thing generated for a brand-new
+	// video, racing ahead of the metadata indexer (see SetThumbOK) — probe
+	// duration directly here rather than leaving the duration badge absent
+	// until whenever the indexer next reaches this file.
+	durationSeconds := meta.DurationSeconds
+	if durationSeconds == nil {
+		if probe, err := media.Probe(m.baseCtx, j.absVideoPath); err == nil {
+			durationSeconds = &probe.DurationSeconds
+		}
+	}
+
 	genCtx, cancel := context.WithTimeout(m.baseCtx, thumbnailJobTimeout)
 	defer cancel()
-	if err := GenerateWithFallback(genCtx, j.absVideoPath, j.thumbPath, SeekTime(meta.DurationSeconds)); err != nil {
+	if err := GenerateWithFallback(genCtx, j.absVideoPath, j.thumbPath, SeekTime(durationSeconds)); err != nil {
 		if setErr := m.store.SetThumbError(m.baseCtx, j.videoID, j.rootID, j.relPath, j.size, j.mtimeUnix, err.Error()); setErr != nil {
 			slog.Error("recording thumbnail error failed", "id", j.videoID, "error", setErr)
 		}
 		return
 	}
-	if err := m.store.SetThumbOK(m.baseCtx, j.videoID, j.rootID, j.relPath, j.size, j.mtimeUnix); err != nil {
+	if err := m.store.SetThumbOK(m.baseCtx, j.videoID, j.rootID, j.relPath, j.size, j.mtimeUnix, durationSeconds); err != nil {
 		slog.Error("recording thumbnail success failed", "id", j.videoID, "error", err)
 	}
 }
@@ -667,7 +678,7 @@ func (m *Manager) runSpriteJob(j spriteJob, done chan struct{}) {
 		}
 		return
 	}
-	if err := m.store.SetSpriteOK(m.baseCtx, j.videoID, j.rootID, j.relPath, j.size, j.mtimeUnix); err != nil {
+	if err := m.store.SetSpriteOK(m.baseCtx, j.videoID, j.rootID, j.relPath, j.size, j.mtimeUnix, durationSeconds); err != nil {
 		slog.Error("recording sprite success failed", "id", j.videoID, "error", err)
 	}
 }

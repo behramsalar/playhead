@@ -58,20 +58,30 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// NeedsProbe reports whether id is missing from the index or its stored
-// size/mtime differ from the current filesystem values — the indexer's
-// signal to (re-)run ffprobe rather than trusting the cached row.
+// NeedsProbe reports whether id is missing from the index, its stored
+// size/mtime differ from the current filesystem values, or it has never
+// actually been probed — the indexer's signal to (re-)run ffprobe rather
+// than trusting the cached row. status == "pending" (the column's default)
+// covers a row created by SetThumbOK/SetSpriteOK/SetRemuxOK racing ahead
+// of the indexer for a brand-new file: without this check, that row's
+// size/mtime already match the real file, so it would look
+// already-indexed and be skipped by every future scan even though it was
+// never actually probed and has no duration/width/height/codec data. A
+// row that *was* probed and failed (status == "error") is deliberately
+// excluded from this — see UpsertError — so a permanently broken file
+// isn't reprobed on every scan forever.
 func (s *Store) NeedsProbe(ctx context.Context, id string, size int64, modTime time.Time) (bool, error) {
 	var dbSize int64
 	var dbMtime int64
-	err := s.db.QueryRowContext(ctx, `SELECT size, mtime_unix FROM videos WHERE id = ?`, id).Scan(&dbSize, &dbMtime)
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT size, mtime_unix, status FROM videos WHERE id = ?`, id).Scan(&dbSize, &dbMtime, &status)
 	if err == sql.ErrNoRows {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return dbSize != size || dbMtime != modTime.Unix(), nil
+	return dbSize != size || dbMtime != modTime.Unix() || status == "pending", nil
 }
 
 // UpsertOK records a successful probe. The thumbnail/sprite/remux status
@@ -289,19 +299,22 @@ func (s *Store) GetThumbStatus(ctx context.Context, id string) (status string, t
 // SetThumbOK records a successful thumbnail generation. Thumbnails don't
 // require the metadata indexer to have run first, so this upserts a
 // minimal row (indexed_at_unix left at 0, a sentinel meaning "not yet
-// actually probed") when one doesn't already exist; if the indexer probes
-// the file later, its own upsert fills in the rest and — since it will
-// see this row's size/mtime already match the current file — correctly
-// treats it as unchanged rather than resetting thumb_status again.
-// rootID/relPath/size/mtimeUnix must reflect the file's current on-disk
-// state (the caller just stat'd it to compute the thumbnail's cache
-// filename, so this is free).
-func (s *Store) SetThumbOK(ctx context.Context, id, rootID, relPath string, size, mtimeUnix int64) error {
+// actually probed", and status left at its default "pending" — see
+// NeedsProbe) when one doesn't already exist; the indexer's own upsert
+// still runs for this file later (status == "pending" keeps NeedsProbe
+// returning true even though size/mtime already match) and fills in the
+// rest. durationSeconds is the caller's best-effort probe result (nil if
+// unavailable) — recorded now via COALESCE so the duration badge doesn't
+// have to wait for that later indexer pass, without ever clobbering an
+// already-known value with a missing one. rootID/relPath/size/mtimeUnix
+// must reflect the file's current on-disk state (the caller just stat'd
+// it to compute the thumbnail's cache filename, so this is free).
+func (s *Store) SetThumbOK(ctx context.Context, id, rootID, relPath string, size, mtimeUnix int64, durationSeconds *float64) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO videos (id, root_id, rel_path, size, mtime_unix, indexed_at_unix, thumb_status, thumb_error, first_indexed_at_unix)
-		VALUES (?, ?, ?, ?, ?, 0, 'ok', NULL, ?)
-		ON CONFLICT(id) DO UPDATE SET thumb_status = 'ok', thumb_error = NULL
-	`, id, rootID, relPath, size, mtimeUnix, time.Now().Unix())
+		INSERT INTO videos (id, root_id, rel_path, size, mtime_unix, duration_seconds, indexed_at_unix, thumb_status, thumb_error, first_indexed_at_unix)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 'ok', NULL, ?)
+		ON CONFLICT(id) DO UPDATE SET thumb_status = 'ok', thumb_error = NULL, duration_seconds = COALESCE(excluded.duration_seconds, duration_seconds)
+	`, id, rootID, relPath, size, mtimeUnix, durationSeconds, time.Now().Unix())
 	return err
 }
 
@@ -428,13 +441,17 @@ func (s *Store) GetSpriteStatus(ctx context.Context, id string) (status string, 
 }
 
 // SetSpriteOK records a successful sprite generation, upserting a minimal
-// row if none exists yet (see SetThumbOK).
-func (s *Store) SetSpriteOK(ctx context.Context, id, rootID, relPath string, size, mtimeUnix int64) error {
+// row if none exists yet (see SetThumbOK). durationSeconds is the
+// caller's best-effort probe result (nil if unavailable) — sprite
+// generation already needs an accurate duration to lay out its frames, so
+// this records that same value rather than discarding it once the sheet
+// is done.
+func (s *Store) SetSpriteOK(ctx context.Context, id, rootID, relPath string, size, mtimeUnix int64, durationSeconds *float64) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO videos (id, root_id, rel_path, size, mtime_unix, indexed_at_unix, sprite_status, sprite_error, first_indexed_at_unix)
-		VALUES (?, ?, ?, ?, ?, 0, 'ok', NULL, ?)
-		ON CONFLICT(id) DO UPDATE SET sprite_status = 'ok', sprite_error = NULL
-	`, id, rootID, relPath, size, mtimeUnix, time.Now().Unix())
+		INSERT INTO videos (id, root_id, rel_path, size, mtime_unix, duration_seconds, indexed_at_unix, sprite_status, sprite_error, first_indexed_at_unix)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 'ok', NULL, ?)
+		ON CONFLICT(id) DO UPDATE SET sprite_status = 'ok', sprite_error = NULL, duration_seconds = COALESCE(excluded.duration_seconds, duration_seconds)
+	`, id, rootID, relPath, size, mtimeUnix, durationSeconds, time.Now().Unix())
 	return err
 }
 

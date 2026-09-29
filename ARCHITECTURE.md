@@ -79,7 +79,7 @@ The connection uses WAL mode and `busy_timeout=5000`, but `SetMaxOpenConns(1)`: 
 
 `internal/indexer` walks each root by recursively calling `filesystem.Browse` (the same function `GET /api/browse` uses), so indexing sees exactly what browsing sees — same hidden-entry filter, same symlink safety, no separate traversal logic to keep in sync. For each video file found:
 
-1. `Store.NeedsProbe` checks whether the row is missing or its `size`/`mtime` differ from what's on disk — if not, the file is skipped (no `ffprobe` call).
+1. `Store.NeedsProbe` checks whether the row is missing, its `size`/`mtime` differ from what's on disk, or it's still `status='pending'` (never actually probed — see below) — if none of those hold, the file is skipped (no `ffprobe` call).
 2. Otherwise `ffprobe` runs (`internal/media.Probe`, JSON output via `-show_format -show_streams`) and the result is upserted (`UpsertOK`) or, on failure, the file is still recorded with `status=error` and a `probe_error` message (`UpsertError`) so it isn't retried every scan — only when the file itself changes again.
 3. After a root's walk completes, any row for that root whose ID wasn't seen this pass is deleted (`DeleteStale`) — handles deleted and renamed files (a rename is a new ID; the old ID's row is pruned like a deletion).
 
@@ -97,7 +97,7 @@ If `ffprobe` isn't on `PATH` at all, the indexer logs one warning at startup and
 
 Migration `0002_thumbnails.sql` adds `thumb_status` (`pending`/`ok`/`error`, default `pending`) and `thumb_error` to the `videos` table — no new table. `UpsertOK`/`UpsertError` (the Phase 2 indexer's upserts) reset both to `pending`/`NULL` whenever a file's `size`/`mtime` change, since a changed file's old thumbnail no longer corresponds to its content; an unchanged file's upsert is skipped entirely (per `NeedsProbe`), so its thumbnail status is left alone.
 
-Unlike metadata, thumbnail generation **does not require the indexer to have run first**: `Store.SetThumbOK`/`SetThumbError` upsert a minimal row (real `root_id`/`rel_path`/`size`/`mtime_unix`, `indexed_at_unix` left at the sentinel `0`) if none exists yet. When the indexer later probes that file, it finds size/mtime already matching the current file and correctly treats it as unchanged rather than resetting thumbnail status again. This decoupling matters because thumbnail generation is triggered by browsing, which can happen before or after any given file's first index scan.
+Unlike metadata, thumbnail generation **does not require the indexer to have run first**: `Store.SetThumbOK`/`SetThumbError` upsert a minimal row (real `root_id`/`rel_path`/`size`/`mtime_unix`, `indexed_at_unix` left at the sentinel `0`, `status` left at its column default `pending`) if none exists yet. Leaving `status='pending'` is what keeps `NeedsProbe` returning true for that row later, even though its `size`/`mtime` already match the current file — without it, the indexer would wrongly treat a thumbnail-first row as already-indexed and skip it on every future scan, permanently starving it of duration/width/height/codec metadata. `SetThumbOK`/`SetSpriteOK` also accept a best-effort probed duration (falling back to a direct `media.Probe` call when the indexer hasn't supplied one yet) and record it immediately via `COALESCE`, so the duration badge doesn't have to wait for that later indexer pass at all. This decoupling matters because thumbnail generation is triggered by browsing, which can happen before or after any given file's first index scan.
 
 ### Cache and worker pool (`internal/preview`)
 

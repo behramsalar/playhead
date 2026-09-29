@@ -164,7 +164,7 @@ func TestClearAll(t *testing.T) {
 	if err := store.UpsertOK(ctx, "video-1", "main", "a.mp4", 100, modTime, media.ProbeResult{DurationSeconds: 10}); err != nil {
 		t.Fatalf("UpsertOK error: %v", err)
 	}
-	if err := store.SetThumbOK(ctx, "video-1", "main", "a.mp4", 100, modTime.Unix()); err != nil {
+	if err := store.SetThumbOK(ctx, "video-1", "main", "a.mp4", 100, modTime.Unix(), nil); err != nil {
 		t.Fatalf("SetThumbOK error: %v", err)
 	}
 

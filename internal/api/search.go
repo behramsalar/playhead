@@ -6,6 +6,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"playhead/internal/database"
 )
 
 type searchResultDTO struct {
@@ -51,6 +53,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Search failed.")
 		return
 	}
+	// Spanning every root (rootID == "") can surface rows from a
+	// currently-hidden root — see the matching comment in handleRecent.
+	// A single-root request is already covered: an unknown/hidden root
+	// 404'd via rootByID above.
+	if rootID == "" {
+		rows = filterSearchRowsToVisibleRoots(rows, s)
+	}
 
 	ids := make([]string, len(rows))
 	for i, row := range rows {
@@ -78,4 +87,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, searchResponseDTO{Query: query, Results: results})
+}
+
+// filterSearchRowsToVisibleRoots mirrors filterRecentRowsToVisibleRoots
+// (internal/api/recent.go) for SearchVideoRow — a distinct type, so the
+// two can't share one generic without more ceremony than two small
+// functions cost.
+func filterSearchRowsToVisibleRoots(rows []database.SearchVideoRow, s *Server) []database.SearchVideoRow {
+	kept := make([]database.SearchVideoRow, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := s.rootByID(row.RootID); ok {
+			kept = append(kept, row)
+		}
+	}
+	return kept
 }

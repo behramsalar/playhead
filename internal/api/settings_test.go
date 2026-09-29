@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"playhead/internal/config"
+	"playhead/internal/indexer"
 )
 
 // newConfiguredTestServer completes setup against a real MEDIA_ROOT
@@ -26,6 +27,24 @@ func newConfiguredTestServer(t *testing.T, mediaRootParent, username, password s
 	}
 
 	return withAuthCookie(t, handler, settingsStore)
+}
+
+// newConfiguredTestServerWithIndexer is newConfiguredTestServer plus
+// access to the indexer, for tests that need real indexed content to
+// still be present when a root gets hidden partway through (see
+// hidden_root_test.go).
+func newConfiguredTestServerWithIndexer(t *testing.T, mediaRootParent, username, password string) (http.Handler, *indexer.Indexer) {
+	t.Helper()
+	handler, settingsStore, idx := newUnconfiguredTestServerWithIndexer(t, mediaRootParent)
+
+	body := jsonBody(t, map[string]any{"serverName": "Original Name", "username": username, "password": password})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/setup", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	return withAuthCookie(t, handler, settingsStore), idx
 }
 
 type settingsResponseDTO struct {

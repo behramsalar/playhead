@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+
+	"playhead/internal/database"
 )
 
 // defaultRecentLimit/maxRecentLimit bound the "Recently Added" smart
@@ -51,8 +53,18 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	// Spanning every root (rootID == "") can surface rows belonging to a
+	// currently-hidden root: hiding one drops it from s.roots (see
+	// refreshRoots/settings.MergeRoots) so it stops being scanned, but
+	// doesn't touch its already-indexed rows — those stay in the
+	// database, ready to reappear instantly if the root is unhidden
+	// later, rather than needing a full rescan. A single-root request
+	// doesn't need this check: an unknown/hidden root already 404'd via
+	// rootByID above, so every row for it is inherently fine. Widening
+	// the fetch (like the existing tag-filter case) keeps the returned
+	// count close to what was asked for even after filtering.
 	fetchLimit := limit
-	if len(tagIDs) > 0 {
+	if rootID == "" || len(tagIDs) > 0 {
 		fetchLimit = limit * recentCandidateMultiplier
 	}
 
@@ -61,6 +73,9 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 		slog.Error("listing recently added failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Could not list recently added videos.")
 		return
+	}
+	if rootID == "" {
+		rows = filterRecentRowsToVisibleRoots(rows, s)
 	}
 
 	ids := make([]string, len(rows))
@@ -114,6 +129,21 @@ func filterSearchResultsByAnyTag(videos []searchResultDTO, tagIDs []int64) []sea
 				kept = append(kept, v)
 				break
 			}
+		}
+	}
+	return kept
+}
+
+// filterRecentRowsToVisibleRoots drops rows belonging to a root that
+// isn't currently in s.roots — most notably a hidden root (see the call
+// site's comment in handleRecent). rootByID is the same live-root check
+// every other endpoint already resolves a root through; this just
+// applies it per-row instead of once to a single requested root.
+func filterRecentRowsToVisibleRoots(rows []database.RecentVideoRow, s *Server) []database.RecentVideoRow {
+	kept := make([]database.RecentVideoRow, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := s.rootByID(row.RootID); ok {
+			kept = append(kept, row)
 		}
 	}
 	return kept

@@ -47,6 +47,34 @@ func newUnconfiguredTestServer(t *testing.T, mediaRootParent string) (handler ht
 	return api.New(cfg, dist, store, idx, nil, settingsStore, t.Context()), settingsStore, cfg.DataDir
 }
 
+// newUnconfiguredTestServerWithIndexer is newUnconfiguredTestServer plus
+// access to the indexer — for tests that need to actually scan real files
+// (e.g. to then hide the root they're indexed under and confirm they
+// disappear from a cross-root view) rather than just exercise auth/setup.
+func newUnconfiguredTestServerWithIndexer(t *testing.T, mediaRootParent string) (handler http.Handler, settingsStore *settings.Store, idx *indexer.Indexer) {
+	t.Helper()
+	discovered, err := config.DiscoverRoots(mediaRootParent)
+	if err != nil {
+		t.Fatalf("DiscoverRoots error: %v", err)
+	}
+	cfg := &config.Config{
+		Addr:      ":0",
+		DataDir:   t.TempDir(),
+		MediaRoot: mediaRootParent,
+		Roots:     discovered,
+	}
+	db, err := database.Open(filepath.Join(cfg.DataDir, "index.db"))
+	if err != nil {
+		t.Fatalf("opening test database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store := database.NewStore(db)
+	idx = indexer.New(store, cfg.Roots)
+	settingsStore = settings.NewStore(cfg.DataDir)
+	dist := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html></html>")}}
+	return api.New(cfg, dist, store, idx, nil, settingsStore, t.Context()), settingsStore, idx
+}
+
 func jsonBody(t *testing.T, v any) *bytes.Reader {
 	t.Helper()
 	data, err := json.Marshal(v)
